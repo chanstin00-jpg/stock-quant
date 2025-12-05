@@ -1,8 +1,4 @@
-// api/sina.js
-// 这是一个运行在 Vercel 服务器端的“新浪财经”代理
-
 export default async function handler(request, response) {
-  // 1. 设置 CORS 允许跨域（允许你的网页访问这个接口）
   response.setHeader('Access-Control-Allow-Credentials', true);
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -11,13 +7,11 @@ export default async function handler(request, response) {
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
 
-  // 处理预检请求
   if (request.method === 'OPTIONS') {
     response.status(200).end();
     return;
   }
 
-  // 2. 获取前端传来的股票代码 (symbol)，例如 sh600519
   const { symbol } = request.query;
 
   if (!symbol) {
@@ -25,15 +19,26 @@ export default async function handler(request, response) {
   }
 
   try {
-    // 3. 构造新浪财经 API 地址
-    // scale=240 代表日线, datalen=3000 获取最近3000天数据
     const sinaUrl = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketData.getKLineData?symbol=${symbol}&scale=240&ma=no&datalen=3000`;
 
-    // 4. 服务器代为请求新浪
-    const sinaResponse = await fetch(sinaUrl);
+    // --- 关键修改点：添加 User-Agent 伪装成浏览器 ---
+    const sinaResponse = await fetch(sinaUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://finance.sina.com.cn/'
+      }
+    });
+    // ---------------------------------------------
+
     const data = await sinaResponse.json();
 
-    // 5. 返回数据给前端
+    // 检查新浪是否返回了空数组（有时候代码没错但新浪没数据）
+    if (!Array.isArray(data)) {
+        console.error("Sina returned invalid data:", data);
+        return response.status(500).json({ error: 'Sina API invalid response' });
+    }
+
     return response.status(200).json(data);
 
   } catch (error) {
