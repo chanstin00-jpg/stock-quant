@@ -81,39 +81,62 @@ export const generateMockData = (tickerCode, startDateStr, endDateStr) => {
 };
 
 // --- 核心功能：Tushare API 请求 ---
+// src/utils/dataService.js 中的 fetchTushareData 函数
+
 export const fetchTushareData = async (token, tsCode, startDate, endDate) => {
+  if (!token) throw new Error("Token Empty"); // 必须检查 Token
   if (!tsCode) throw new Error("Code Invalid");
 
   try {
-    // 注意：这里假设你本地有个代理后端运行在 3001 端口
-    // 如果没有后端，浏览器会报 CORS 跨域错误，这是 Tushare 官方限制的
-    const response = await fetch('http://localhost:3001/api/stock', {
+    // 请求我们刚才创建的 Vercel 代理
+    const response = await fetch('/api/tushare', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ts_code: tsCode }) 
+      body: JSON.stringify({
+        token: token,
+        api_name: 'daily',
+        params: {
+          ts_code: tsCode,
+          start_date: startDate.replace(/-/g, ''),
+          end_date: endDate.replace(/-/g, '')
+        },
+        fields: 'trade_date,open,close,high,low,vol'
+      })
     });
 
-    if (!response.ok) throw new Error(`Backend Error: ${response.status}`);
+    if (!response.ok) throw new Error(`Network Error: ${response.status}`);
     
-    const allData = await response.json();
+    const resJson = await response.json();
     
-    if (!Array.isArray(allData) || allData.length === 0) {
-      throw new Error("No data found for this stock");
+    // Tushare 如果返回错误（比如 Token 不对）
+    if (resJson.code !== 0) {
+      throw new Error(resJson.msg || "Tushare API Error");
     }
 
-    const filteredData = allData.filter(item => 
-      item.date >= startDate && item.date <= endDate
-    );
+    // Tushare 的数据格式是 { data: { items: [[date, open...], ...] } }
+    // 我们需要把它转换成我们 App 能看懂的格式 [{date:..., open:...}, ...]
+    const items = resJson.data && resJson.data.items;
+    
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error("No data found");
+    }
 
-    if (filteredData.length === 0) throw new Error("No data in selected range");
+    // 转换数据格式
+    // 顺序对应上面的 fields: trade_date, open, close, high, low, vol
+    const formattedData = items.map(item => ({
+      date: item[0].slice(0, 4) + '-' + item[0].slice(4, 6) + '-' + item[0].slice(6, 8), // 20230101 -> 2023-01-01
+      open: item[1],
+      close: item[2],
+      high: item[3],
+      low: item[4],
+      volume: item[5]
+    })).reverse(); // Tushare 返回的是倒序，我们需要正序
 
-    return filteredData;
+    return formattedData;
+
   } catch (error) {
     console.error("Fetch error:", error);
-    // 抛出特定错误供前端捕获，提示用户使用脚本模式
-    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-        throw new Error('CORS_BLOCK');
-    }
+    // 如果出错了，抛出错误，前端会捕获并显示
     throw error;
   }
 };
